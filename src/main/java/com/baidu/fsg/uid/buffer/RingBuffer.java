@@ -61,8 +61,8 @@ public class RingBuffer {
     private final int paddingThreshold; 
     
     /** Reject put/take buffer handle policy */
-    private RejectedPutBufferHandler rejectedPutHandler = this::discardPutBuffer;
-    private RejectedTakeBufferHandler rejectedTakeHandler = this::exceptionRejectedTakeBuffer; 
+    private RejectedPutBufferHandler rejectedPutHandler;
+    private RejectedTakeBufferHandler rejectedTakeHandler;
     
     /** Executor of padding buffer */
     private BufferPaddingExecutor bufferPaddingExecutor;
@@ -96,6 +96,19 @@ public class RingBuffer {
         this.flags = initFlags(bufferSize);
         
         this.paddingThreshold = bufferSize * paddingFactor / 100;
+        rejectedPutHandler = new RejectedPutBufferHandler() {
+            @Override
+            public void rejectPutBuffer(RingBuffer ringBuffer, long uid) {
+                LOGGER.warn("Rejected putting buffer for uid:{}. {}", uid, ringBuffer);
+            }
+        };
+        rejectedTakeHandler = new RejectedTakeBufferHandler() {
+            @Override
+            public void rejectTakeBuffer(RingBuffer ringBuffer) {
+                LOGGER.warn("Rejected take buffer. {}", ringBuffer);
+                throw new RuntimeException("Rejected take buffer. " + ringBuffer);
+            }
+        };
     }
 
     /**
@@ -138,6 +151,10 @@ public class RingBuffer {
         return true;
     }
 
+    public long applyAsLong(long old) {
+        return old == tail.get() ? old : old + 1;
+    }
+
     /**
      * Take an UID of the ring at the next cursor, this is a lock free operation by using atomic cursor<p>
      * 
@@ -151,7 +168,12 @@ public class RingBuffer {
     public long take() {
         // spin get next available cursor
         long currentCursor = cursor.get();
-        long nextCursor = cursor.updateAndGet(old -> old == tail.get() ? old : old + 1);
+
+        long prev, nextCursor;
+        do {
+            prev = cursor.get();
+            nextCursor = applyAsLong(prev);
+        } while (!cursor.compareAndSet(prev, nextCursor));
 
         // check for safety consideration, it never occurs
         Assert.isTrue(nextCursor >= currentCursor, "Curosr can't move back");

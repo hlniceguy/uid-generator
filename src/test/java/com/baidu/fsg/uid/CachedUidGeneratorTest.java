@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntUnaryOperator;
 
 /**
  * Test for {@link CachedUidGenerator}
@@ -40,7 +41,7 @@ public class CachedUidGeneratorTest {
     @Test
     public void testSerialGenerate() throws IOException {
         // Generate UID serially
-        Set<Long> uidSet = new HashSet<>(SIZE);
+        Set<Long> uidSet = new HashSet<Long>(SIZE);
         for (int i = 0; i < SIZE; i++) {
             doGenerate(uidSet, i);
         }
@@ -57,13 +58,18 @@ public class CachedUidGeneratorTest {
      */
     @Test
     public void testParallelGenerate() throws InterruptedException, IOException {
-        AtomicInteger control = new AtomicInteger(-1);
-        Set<Long> uidSet = new ConcurrentSkipListSet<>();
+        final AtomicInteger control = new AtomicInteger(-1);
+        final Set<Long> uidSet = new ConcurrentSkipListSet<Long>();
 
         // Initialize threads
-        List<Thread> threadList = new ArrayList<>(THREADS);
+        List<Thread> threadList = new ArrayList<Thread>(THREADS);
         for (int i = 0; i < THREADS; i++) {
-            Thread thread = new Thread(() -> workerRun(uidSet, control));
+            Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    CachedUidGeneratorTest.this.workerRun(uidSet, control);
+                }
+            });
             thread.setName("UID-generator-" + i);
 
             threadList.add(thread);
@@ -82,12 +88,20 @@ public class CachedUidGeneratorTest {
         checkUniqueID(uidSet);
     }
 
+    public int applyAsLong(int old) {
+        return (old == SIZE ? SIZE : old + 1);
+    }
     /**
      * Woker run
      */
     private void workerRun(Set<Long> uidSet, AtomicInteger control) {
         for (;;) {
-            int myPosition = control.updateAndGet(old -> (old == SIZE ? SIZE : old + 1));
+            int prev, myPosition;
+            do {
+                prev = control.get();
+                myPosition = applyAsLong(prev);
+            } while (!control.compareAndSet(prev, myPosition));
+
             if (myPosition == SIZE) {
                 return;
             }

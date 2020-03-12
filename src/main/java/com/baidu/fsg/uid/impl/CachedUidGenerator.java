@@ -18,6 +18,7 @@ package com.baidu.fsg.uid.impl;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.baidu.fsg.uid.buffer.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
@@ -25,10 +26,6 @@ import org.springframework.util.Assert;
 
 import com.baidu.fsg.uid.BitsAllocator;
 import com.baidu.fsg.uid.UidGenerator;
-import com.baidu.fsg.uid.buffer.BufferPaddingExecutor;
-import com.baidu.fsg.uid.buffer.RejectedPutBufferHandler;
-import com.baidu.fsg.uid.buffer.RejectedTakeBufferHandler;
-import com.baidu.fsg.uid.buffer.RingBuffer;
 import com.baidu.fsg.uid.exception.UidGenerateException;
 
 /**
@@ -103,7 +100,7 @@ public class CachedUidGenerator extends DefaultUidGenerator implements Disposabl
     protected List<Long> nextIdsForOneSecond(long currentSecond) {
         // Initialize result list size of (max sequence + 1)
         int listSize = (int) bitsAllocator.getMaxSequence() + 1;
-        List<Long> uidList = new ArrayList<>(listSize);
+        List<Long> uidList = new ArrayList<Long>(listSize);
 
         // Allocate the first sequence of the second, the others can be calculated with the offset
         long firstSeqUid = bitsAllocator.allocate(currentSecond - epochSeconds, workerId, 0L);
@@ -125,7 +122,23 @@ public class CachedUidGenerator extends DefaultUidGenerator implements Disposabl
 
         // initialize RingBufferPaddingExecutor
         boolean usingSchedule = (scheduleInterval != null);
-        this.bufferPaddingExecutor = new BufferPaddingExecutor(ringBuffer, this::nextIdsForOneSecond, usingSchedule);
+        BufferedUidProvider bufferedUidProvider = new BufferedUidProvider(){
+            @Override
+            public List<Long> provide(long momentInSecond) {
+                // Initialize result list size of (max sequence + 1)
+                int listSize = (int) bitsAllocator.getMaxSequence() + 1;
+                List<Long> uidList = new ArrayList<Long>(listSize);
+
+                // Allocate the first sequence of the second, the others can be calculated with the offset
+                long firstSeqUid = bitsAllocator.allocate(momentInSecond - epochSeconds, workerId, 0L);
+                for (int offset = 0; offset < listSize; offset++) {
+                    uidList.add(firstSeqUid + offset);
+                }
+
+                return uidList;
+            }
+        };
+        this.bufferPaddingExecutor = new BufferPaddingExecutor(ringBuffer, bufferedUidProvider, usingSchedule);
         if (usingSchedule) {
             bufferPaddingExecutor.setScheduleInterval(scheduleInterval);
         }

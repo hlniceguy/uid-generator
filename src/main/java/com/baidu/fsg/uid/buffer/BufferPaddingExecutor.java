@@ -101,7 +101,12 @@ public class BufferPaddingExecutor {
      */
     public void start() {
         if (bufferPadSchedule != null) {
-            bufferPadSchedule.scheduleWithFixedDelay(() -> paddingBuffer(), scheduleInterval, scheduleInterval, TimeUnit.SECONDS);
+            bufferPadSchedule.scheduleWithFixedDelay(new Runnable() {
+                @Override
+                public void run() {
+                    BufferPaddingExecutor.this.paddingBuffer();
+                }
+            }, scheduleInterval, scheduleInterval, TimeUnit.SECONDS);
         }
     }
 
@@ -131,7 +136,12 @@ public class BufferPaddingExecutor {
      * Padding buffer in the thread pool
      */
     public void asyncPadding() {
-        bufferPadExecutors.submit(this::paddingBuffer);
+        bufferPadExecutors.submit(new Runnable() {
+            @Override
+            public void run() {
+                BufferPaddingExecutor.this.paddingBuffer();
+            }
+        });
     }
 
     /**
